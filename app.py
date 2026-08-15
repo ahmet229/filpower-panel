@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 
 st.set_page_config(page_title="Filpower Akıllı Fiyatlandırma", layout="wide", page_icon="⚡")
 
@@ -13,6 +14,20 @@ fil_puan = st.sidebar.slider("Fil-Puan Bütçesi (%)", 1, 5, 3) / 100
 hedef_kar = st.sidebar.slider("Hedef Kâr Marjı (%)", 10, 100, 20) / 100
 
 tab1, tab2 = st.tabs(["🧮 Tekli Ürün Hesaplama", "📁 IdeaSoft Excel Toplu Hesaplama"])
+
+# Metin içindeki Türkçe para formatını temizleme fonksiyonu
+def fiyat_temizle(val):
+    if pd.isna(val):
+        return 0.0
+    val_str = str(val).strip().replace('TL', '').replace('₺', '').replace(' ', '')
+    if '.' in val_str and ',' in val_str:
+        val_str = val_str.replace('.', '').replace(',', '.')
+    elif ',' in val_str:
+        val_str = val_str.replace(',', '.')
+    try:
+        return float(val_str)
+    except:
+        return 0.0
 
 # --- TAB 1: TEKLİ HESAPLAMA ---
 with tab1:
@@ -52,30 +67,31 @@ with tab2:
         try:
             df = pd.read_excel(uploaded_file)
             
-            # Sütun isimlerini otomatik yakalama
             col_map = {}
             for col in df.columns:
                 c_lower = str(col).lower()
                 if "label" in c_lower or "adı" in c_lower or "title" in c_lower:
                     col_map["ad"] = col
-                elif "buyingprice" in c_lower or "alış" in c_lower or "maliyet" in c_lower:
-                    col_map["maliyet"] = col
+                elif "buyingprice" in c_lower or "alış" in c_lower or "maliyet" in c_lower or "price" in c_lower:
+                    if "maliyet" not in col_map:
+                        col_map["maliyet"] = col
                 elif "ean" in c_lower or "barkod" in c_lower or "barcode" in c_lower:
                     col_map["barkod"] = col
 
             maliyet_col = col_map.get("maliyet")
             
             if maliyet_col:
-                # Hesaplama Algoritmaları
-                df["Ürün Maliyeti"] = pd.to_numeric(df[maliyet_col], errors="coerce").fillna(0)
+                # Sayısal Temizleme
+                df["Ürün Maliyeti"] = df[maliyet_col].apply(fiyat_temizle)
                 
+                # Hesaplama Algoritmaları
                 df["Trendyol Satış Fiyatı"] = (df["Ürün Maliyeti"] + kargo_toplu) * (1 + hedef_kar) / (1 - trendyol_komisyon)
                 df["Trendyol Net Kâr"] = df["Trendyol Satış Fiyatı"] * (1 - trendyol_komisyon) - df["Ürün Maliyeti"] - kargo_toplu
                 
                 df["Site Satış Fiyatı"] = df["Trendyol Satış Fiyatı"] * 0.92
                 df["Site Net Kâr"] = df["Site Satış Fiyatı"] - (df["Site Satış Fiyatı"] * iyzico_pos) - (df["Site Satış Fiyatı"] * fil_puan) - df["Ürün Maliyeti"] - kargo_toplu
 
-                # Yuvarlama
+                # Formatlama
                 df["Trendyol Satış Fiyatı"] = df["Trendyol Satış Fiyatı"].round(2)
                 df["Trendyol Net Kâr"] = df["Trendyol Net Kâr"].round(2)
                 df["Site Satış Fiyatı"] = df["Site Satış Fiyatı"].round(2)
@@ -83,7 +99,6 @@ with tab2:
 
                 st.success(f"✅ Toplam {len(df)} ürün başarıyla hesaplandı!")
                 
-                # Gösterilecek sütunlar
                 show_cols = []
                 if "ad" in col_map: show_cols.append(col_map["ad"])
                 if "barkod" in col_map: show_cols.append(col_map["barkod"])
@@ -91,6 +106,6 @@ with tab2:
                 
                 st.dataframe(df[show_cols], use_container_width=True)
             else:
-                st.error("❌ Excel dosyasında 'Alış Fiyatı' (buyingPrice) sütunu bulunamadı. Lütfen IdeaSoft'tan indirirken 'Alış Fiyatı' kutucuğunu seçtiğinizden emin olun.")
+                st.error("❌ Excel dosyasında 'Alış Fiyatı' sütunu tespit edilemedi.")
         except Exception as e:
             st.error(f"Dosya okuma hatası: {e}")
