@@ -10,7 +10,7 @@ st.sidebar.header("⚙️ Finansal Parametreler")
 trendyol_komisyon = st.sidebar.slider("Trendyol Komisyonu (%)", 10, 25, 18) / 100
 iyzico_pos = st.sidebar.slider("iyzico POS Oranı (%)", 1, 10, 7) / 100
 fil_puan = st.sidebar.slider("Fil-Puan Bütçesi (%)", 1, 5, 3) / 100
-hedef_kar = st.sidebar.slider("Hedef Kâr Marjı (%)", 10, 50, 20) / 100
+hedef_kar = st.sidebar.slider("Hedef Kâr Marjı (%)", 10, 100, 20) / 100
 
 # Ana Ekran: Ürün Veri Girişi
 st.subheader("📦 Ürün Bilgileri")
