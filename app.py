@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import urllib.parse
+import re
 
 st.set_page_config(page_title="Filpower Akıllı Fiyatlandırma", layout="wide", page_icon="⚡")
 
@@ -30,11 +31,23 @@ def fiyat_temizle(val):
     except:
         return 0.0
 
-def trendyol_link_olustur(row, col_ad, col_barkod):
-    barkod = str(row[col_barkod]).strip() if pd.notna(row[col_barkod]) and str(row[col_barkod]).strip().lower() != 'none' else ""
+def trendyol_link_olustur(row, col_ad, col_barkod, mod):
+    barkod = str(row[col_barkod]).strip() if pd.notna(row[col_barkod]) and str(row[col_barkod]).strip().lower() not in ['none', 'nan', '0'] else ""
     ad = str(row[col_ad]).strip() if pd.notna(row[col_ad]) else ""
     
-    sorgu = barkod if (barkod and len(barkod) > 3) else ad
+    # Ürün adındaki SKU vs karmaşık metinleri temizleme
+    ad_temiz = re.sub(r'SKU:.*', '', ad, flags=re.IGNORECASE).strip()
+
+    if mod == "Sadece Ürün Adı İle":
+        sorgu = ad_temiz
+    elif mod == "Sadece Barkod İle":
+        sorgu = barkod
+    else:  # Akıllı Mod (Varsayılan)
+        if len(barkod) >= 12 and barkod.isdigit():
+            sorgu = barkod
+        else:
+            sorgu = ad_temiz
+
     if not sorgu:
         return ""
     return f"https://www.trendyol.com/sr?q={urllib.parse.quote(sorgu)}"
@@ -90,7 +103,7 @@ with tab2:
                 df.columns = [f"Sütun {i+1} (Örn: {df_raw.iloc[0, i]})" for i in range(len(df_raw.columns))]
 
             st.markdown("---")
-            st.markdown("### 🛠️ Sütun Eşleştirme")
+            st.markdown("### 🛠️ Sütun Eşleştirme ve Arama Ayarı")
             
             cols_list = list(df.columns)
             
@@ -98,13 +111,15 @@ with tab2:
             default_maliyet = 2 if len(cols_list) > 2 else 0
             default_barkod = 6 if len(cols_list) > 6 else 0
 
-            c1, c2, c3 = st.columns(3)
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
                 sel_ad = st.selectbox("Ürün Adı Sütunu:", cols_list, index=default_ad)
             with c2:
                 sel_maliyet = st.selectbox("Alış Fiyatı / Maliyet Sütunu:", cols_list, index=default_maliyet)
             with c3:
                 sel_barkod = st.selectbox("Barkod Sütunu:", cols_list, index=default_barkod)
+            with c4:
+                arama_modu = st.selectbox("Trendyol Arama Tipi:", ["Otomatik (Akıllı)", "Sadece Ürün Adı İle", "Sadece Barkod İle"])
 
             calc_df = pd.DataFrame()
             calc_df["Ürün Adı"] = df[sel_ad]
@@ -118,7 +133,7 @@ with tab2:
             calc_df["Site Net Kâr"] = calc_df["Site Satış Fiyatı"] - (calc_df["Site Satış Fiyatı"] * iyzico_pos) - (calc_df["Site Satış Fiyatı"] * fil_puan) - calc_df["Ürün Maliyeti"] - kargo_toplu
 
             # Trendyol Canlı Arama Linki
-            calc_df["Trendyol'da İncele"] = df.apply(lambda r: trendyol_link_olustur(r, sel_ad, sel_barkod), axis=1)
+            calc_df["Trendyol'da İncele"] = df.apply(lambda r: trendyol_link_olustur(r, sel_ad, sel_barkod, arama_modu), axis=1)
 
             calc_df["Ürün Maliyeti"] = calc_df["Ürün Maliyeti"].round(2)
             calc_df["Trendyol Satış Fiyatı"] = calc_df["Trendyol Satış Fiyatı"].round(2)
