@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import re
 
 st.set_page_config(page_title="Filpower Akıllı Fiyatlandırma", layout="wide", page_icon="⚡")
 
@@ -15,7 +14,6 @@ hedef_kar = st.sidebar.slider("Hedef Kâr Marjı (%)", 10, 100, 20) / 100
 
 tab1, tab2 = st.tabs(["🧮 Tekli Ürün Hesaplama", "📁 IdeaSoft Excel Toplu Hesaplama"])
 
-# Metin içindeki Türkçe para formatını temizleme fonksiyonu
 def fiyat_temizle(val):
     if pd.isna(val):
         return 0.0
@@ -65,33 +63,53 @@ with tab2:
 
     if uploaded_file is not None:
         try:
-            df = pd.read_excel(uploaded_file)
+            # Başlıksız oku
+            df_raw = pd.read_excel(uploaded_file, header=None)
             
+            # İlk satır başlık mı kontrol et
+            row0_text = " ".join([str(x).lower() for x in df_raw.iloc[0].values])
+            header_keywords = ["label", "buyingprice", "barcode", "eans", "stockcode", "price", "alış", "maliyet", "barkod"]
+            
+            if any(kw in row0_text for kw in header_keywords):
+                df = pd.read_excel(uploaded_file)
+            else:
+                df = df_raw.copy()
+                col_names = []
+                for idx in range(len(df.columns)):
+                    if idx == 1: col_names.append("Ürün Adı")
+                    elif idx == 2: col_names.append("Alış Fiyatı")
+                    elif idx == 6: col_names.append("Barkod")
+                    else: col_names.append(f"Kolon_{idx}")
+                df.columns = col_names
+
             col_map = {}
             for col in df.columns:
                 c_lower = str(col).lower()
-                if "label" in c_lower or "adı" in c_lower or "title" in c_lower:
+                if "label" in c_lower or "ad" in c_lower or "title" in c_lower:
                     col_map["ad"] = col
-                elif "buyingprice" in c_lower or "alış" in c_lower or "maliyet" in c_lower or "price" in c_lower:
-                    if "maliyet" not in col_map:
-                        col_map["maliyet"] = col
+                elif "buyingprice" in c_lower or "alış" in c_lower or "maliyet" in c_lower:
+                    col_map["maliyet"] = col
                 elif "ean" in c_lower or "barkod" in c_lower or "barcode" in c_lower:
                     col_map["barkod"] = col
 
+            if "maliyet" not in col_map and len(df.columns) > 2:
+                col_map["maliyet"] = df.columns[2]
+            if "ad" not in col_map and len(df.columns) > 1:
+                col_map["ad"] = df.columns[1]
+            if "barkod" not in col_map and len(df.columns) > 6:
+                col_map["barkod"] = df.columns[6]
+
             maliyet_col = col_map.get("maliyet")
             
-            if maliyet_col:
-                # Sayısal Temizleme
+            if maliyet_col is not None:
                 df["Ürün Maliyeti"] = df[maliyet_col].apply(fiyat_temizle)
                 
-                # Hesaplama Algoritmaları
                 df["Trendyol Satış Fiyatı"] = (df["Ürün Maliyeti"] + kargo_toplu) * (1 + hedef_kar) / (1 - trendyol_komisyon)
                 df["Trendyol Net Kâr"] = df["Trendyol Satış Fiyatı"] * (1 - trendyol_komisyon) - df["Ürün Maliyeti"] - kargo_toplu
                 
                 df["Site Satış Fiyatı"] = df["Trendyol Satış Fiyatı"] * 0.92
                 df["Site Net Kâr"] = df["Site Satış Fiyatı"] - (df["Site Satış Fiyatı"] * iyzico_pos) - (df["Site Satış Fiyatı"] * fil_puan) - df["Ürün Maliyeti"] - kargo_toplu
 
-                # Formatlama
                 df["Trendyol Satış Fiyatı"] = df["Trendyol Satış Fiyatı"].round(2)
                 df["Trendyol Net Kâr"] = df["Trendyol Net Kâr"].round(2)
                 df["Site Satış Fiyatı"] = df["Site Satış Fiyatı"].round(2)
@@ -106,6 +124,6 @@ with tab2:
                 
                 st.dataframe(df[show_cols], use_container_width=True)
             else:
-                st.error("❌ Excel dosyasında 'Alış Fiyatı' sütunu tespit edilemedi.")
+                st.error("❌ Excel dosyasında maliyet sütunu okunamadı.")
         except Exception as e:
             st.error(f"Dosya okuma hatası: {e}")
