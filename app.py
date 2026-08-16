@@ -17,7 +17,9 @@ tab1, tab2 = st.tabs(["🧮 Tekli Ürün Hesaplama", "📁 IdeaSoft Excel Toplu 
 def fiyat_temizle(val):
     if pd.isna(val):
         return 0.0
-    val_str = str(val).strip().replace('TL', '').replace('₺', '').replace(' ', '')
+    val_str = str(val).strip().replace('TL', '').replace('₺', '').replace(' ', '').replace('\xa0', '')
+    if not val_str:
+        return 0.0
     if '.' in val_str and ',' in val_str:
         val_str = val_str.replace('.', '').replace(',', '.')
     elif ',' in val_str:
@@ -63,67 +65,57 @@ with tab2:
 
     if uploaded_file is not None:
         try:
-            # Başlıksız oku
             df_raw = pd.read_excel(uploaded_file, header=None)
             
-            # İlk satır başlık mı kontrol et
-            row0_text = " ".join([str(x).lower() for x in df_raw.iloc[0].values])
-            header_keywords = ["label", "buyingprice", "barcode", "eans", "stockcode", "price", "alış", "maliyet", "barkod"]
-            
-            if any(kw in row0_text for kw in header_keywords):
+            row0_is_header = False
+            sample_headers = ["label", "buyingprice", "barcode", "eans", "stockcode", "price", "maliyet", "barkod", "ürün adı"]
+            first_row_str = " ".join([str(x).lower() for x in df_raw.iloc[0].values])
+            if any(h in first_row_str for h in sample_headers):
+                row0_is_header = True
+
+            if row0_is_header:
                 df = pd.read_excel(uploaded_file)
             else:
                 df = df_raw.copy()
-                col_names = []
-                for idx in range(len(df.columns)):
-                    if idx == 1: col_names.append("Ürün Adı")
-                    elif idx == 2: col_names.append("Alış Fiyatı")
-                    elif idx == 6: col_names.append("Barkod")
-                    else: col_names.append(f"Kolon_{idx}")
-                df.columns = col_names
+                df.columns = [f"Sütun {i+1} (Örn: {df_raw.iloc[0, i]})" for i in range(len(df_raw.columns))]
 
-            col_map = {}
-            for col in df.columns:
-                c_lower = str(col).lower()
-                if "label" in c_lower or "ad" in c_lower or "title" in c_lower:
-                    col_map["ad"] = col
-                elif "buyingprice" in c_lower or "alış" in c_lower or "maliyet" in c_lower:
-                    col_map["maliyet"] = col
-                elif "ean" in c_lower or "barkod" in c_lower or "barcode" in c_lower:
-                    col_map["barkod"] = col
-
-            if "maliyet" not in col_map and len(df.columns) > 2:
-                col_map["maliyet"] = df.columns[2]
-            if "ad" not in col_map and len(df.columns) > 1:
-                col_map["ad"] = df.columns[1]
-            if "barkod" not in col_map and len(df.columns) > 6:
-                col_map["barkod"] = df.columns[6]
-
-            maliyet_col = col_map.get("maliyet")
+            st.markdown("---")
+            st.markdown("### 🛠️ Sütun Eşleştirme")
             
-            if maliyet_col is not None:
-                df["Ürün Maliyeti"] = df[maliyet_col].apply(fiyat_temizle)
-                
-                df["Trendyol Satış Fiyatı"] = (df["Ürün Maliyeti"] + kargo_toplu) * (1 + hedef_kar) / (1 - trendyol_komisyon)
-                df["Trendyol Net Kâr"] = df["Trendyol Satış Fiyatı"] * (1 - trendyol_komisyon) - df["Ürün Maliyeti"] - kargo_toplu
-                
-                df["Site Satış Fiyatı"] = df["Trendyol Satış Fiyatı"] * 0.92
-                df["Site Net Kâr"] = df["Site Satış Fiyatı"] - (df["Site Satış Fiyatı"] * iyzico_pos) - (df["Site Satış Fiyatı"] * fil_puan) - df["Ürün Maliyeti"] - kargo_toplu
+            cols_list = list(df.columns)
+            
+            default_ad = 1 if len(cols_list) > 1 else 0
+            default_maliyet = 2 if len(cols_list) > 2 else 0
+            default_barkod = 6 if len(cols_list) > 6 else 0
 
-                df["Trendyol Satış Fiyatı"] = df["Trendyol Satış Fiyatı"].round(2)
-                df["Trendyol Net Kâr"] = df["Trendyol Net Kâr"].round(2)
-                df["Site Satış Fiyatı"] = df["Site Satış Fiyatı"].round(2)
-                df["Site Net Kâr"] = df["Site Net Kâr"].round(2)
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                sel_ad = st.selectbox("Ürün Adı Sütunu:", cols_list, index=default_ad)
+            with c2:
+                sel_maliyet = st.selectbox("Alış Fiyatı / Maliyet Sütunu:", cols_list, index=default_maliyet)
+            with c3:
+                sel_barkod = st.selectbox("Barkod Sütunu:", cols_list, index=default_barkod)
 
-                st.success(f"✅ Toplam {len(df)} ürün başarıyla hesaplandı!")
-                
-                show_cols = []
-                if "ad" in col_map: show_cols.append(col_map["ad"])
-                if "barkod" in col_map: show_cols.append(col_map["barkod"])
-                show_cols.extend(["Ürün Maliyeti", "Trendyol Satış Fiyatı", "Trendyol Net Kâr", "Site Satış Fiyatı", "Site Net Kâr"])
-                
-                st.dataframe(df[show_cols], use_container_width=True)
-            else:
-                st.error("❌ Excel dosyasında maliyet sütunu okunamadı.")
+            calc_df = pd.DataFrame()
+            calc_df["Ürün Adı"] = df[sel_ad]
+            calc_df["Barkod"] = df[sel_barkod]
+            calc_df["Ürün Maliyeti"] = df[sel_maliyet].apply(fiyat_temizle)
+            
+            calc_df["Trendyol Satış Fiyatı"] = (calc_df["Ürün Maliyeti"] + kargo_toplu) * (1 + hedef_kar) / (1 - trendyol_komisyon)
+            calc_df["Trendyol Net Kâr"] = calc_df["Trendyol Satış Fiyatı"] * (1 - trendyol_komisyon) - calc_df["Ürün Maliyeti"] - kargo_toplu
+            
+            calc_df["Site Satış Fiyatı"] = calc_df["Trendyol Satış Fiyatı"] * 0.92
+            calc_df["Site Net Kâr"] = calc_df["Site Satış Fiyatı"] - (calc_df["Site Satış Fiyatı"] * iyzico_pos) - (calc_df["Site Satış Fiyatı"] * fil_puan) - calc_df["Ürün Maliyeti"] - kargo_toplu
+
+            calc_df["Ürün Maliyeti"] = calc_df["Ürün Maliyeti"].round(2)
+            calc_df["Trendyol Satış Fiyatı"] = calc_df["Trendyol Satış Fiyatı"].round(2)
+            calc_df["Trendyol Net Kâr"] = calc_df["Trendyol Net Kâr"].round(2)
+            calc_df["Site Satış Fiyatı"] = calc_df["Site Satış Fiyatı"].round(2)
+            calc_df["Site Net Kâr"] = calc_df["Site Net Kâr"].round(2)
+
+            st.markdown("---")
+            st.success(f"✅ Toplam {len(calc_df)} ürün başarıyla hesaplandı!")
+            st.dataframe(calc_df, use_container_width=True)
+
         except Exception as e:
-            st.error(f"Dosya okuma hatası: {e}")
+            st.error(f"Dosya işleme hatası: {e}")
