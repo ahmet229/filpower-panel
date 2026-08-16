@@ -68,7 +68,6 @@ with tab1:
 with tab2:
     st.subheader('📊 IdeaSoft Ürün Listesi')
 
-    # DİNAMİK DOSYA AVCISI: İsmine bakmaksızın repodaki excel dosyasını bulur
     existing_default = None
     for file in os.listdir('.'):
         if file.endswith('.xls') or file.endswith('.xlsx'):
@@ -76,7 +75,7 @@ with tab2:
             break
 
     uploaded_file = st.file_uploader('Farklı bir dosya yüklemek isterseniz buraya sürükleyin', type=['xls', 'xlsx'])
-    kargo_toplu = st.number_input('Ürün Başı Ortalama Kargo Maliyeti (TL):', min_value=0.0, value=70.0, step=5.0, key='kargo_toplu')
+    kargo_toplu = st.number_input('Ürün Başı Ortalama Kargo Maliyeti (TL):', min_value=0.0, value=120.0, step=5.0, key='kargo_toplu')
 
     target_file = None
     if uploaded_file is not None:
@@ -106,10 +105,17 @@ with tab2:
                 with c4: arama_modu = st.selectbox('Trendyol Arama Tipi:', ['Otomatik (Akıllı)', 'Sadece Ürün Adı İle', 'Sadece Barkod İle'])
             st.markdown('---')
 
+            # Canlı Maliyet Değişimini Hafızada Tutma
+            file_key = f"{getattr(target_file, 'name', target_file)}_{sel_maliyet}"
+            if st.session_state.get("file_key") != file_key or "user_maliyetler" not in st.session_state:
+                st.session_state["file_key"] = file_key
+                st.session_state["user_maliyetler"] = df[sel_maliyet].apply(fiyat_temizle).values
+
+            # Hesaplama Tablosu
             calc_df = pd.DataFrame()
             calc_df['Ürün Adı'] = df[sel_ad]
             calc_df['Barkod'] = df[sel_barkod]
-            calc_df['Ürün Maliyeti'] = df[sel_maliyet].apply(fiyat_temizle)
+            calc_df['Ürün Maliyeti'] = st.session_state["user_maliyetler"]
 
             calc_df['Trendyol Satış Fiyatı'] = (calc_df['Ürün Maliyeti'] + kargo_toplu) * (1 + hedef_kar) / (1 - trendyol_komisyon)
             calc_df['Trendyol Net Kâr'] = calc_df['Trendyol Satış Fiyatı'] * (1 - trendyol_komisyon) - calc_df['Ürün Maliyeti'] - kargo_toplu
@@ -124,7 +130,28 @@ with tab2:
             calc_df['Site Satış Fiyatı'] = calc_df['Site Satış Fiyatı'].round(2)
             calc_df['Site Net Kâr'] = calc_df['Site Net Kâr'].round(2)
 
-            st.success(f'✅ Toplam {len(calc_df)} ürün başarıyla hesaplandı!')
-            st.dataframe(calc_df, column_config={"Trendyol'da İncele": st.column_config.LinkColumn('Trendyol Canlı Arama', display_text="🔍 Trendyol'da Gör")}, use_container_width=True)
+            st.caption("💡 **Aşağıdaki tablodan 'Ürün Maliyeti' hücresine çift tıklayıp fiyat yazabilirsiniz. Tüm satış fiyatları ve kârlar anında yenilenir:**")
+
+            edited_df = st.data_editor(
+                calc_df,
+                column_config={
+                    "Ürün Adı": st.column_config.Column(disabled=True),
+                    "Barkod": st.column_config.Column(disabled=True),
+                    "Ürün Maliyeti": st.column_config.NumberColumn("Ürün Maliyeti (TL)", min_value=0.0, step=10.0, format="%.2f TL"),
+                    "Trendyol Satış Fiyatı": st.column_config.NumberColumn(disabled=True, format="%.2f TL"),
+                    "Trendyol Net Kâr": st.column_config.NumberColumn(disabled=True, format="%.2f TL"),
+                    "Site Satış Fiyatı": st.column_config.NumberColumn(disabled=True, format="%.2f TL"),
+                    "Site Net Kâr": st.column_config.NumberColumn(disabled=True, format="%.2f TL"),
+                    "Trendyol'da İncele": st.column_config.LinkColumn('Trendyol Canlı Arama', display_text="🔍 Trendyol'da Gör")
+                },
+                use_container_width=True,
+                key="canli_maliyet_editor"
+            )
+
+            # Hücre değiştiğinde anında tekrar hesapla
+            if not edited_df['Ürün Maliyeti'].equals(pd.Series(st.session_state["user_maliyetler"])):
+                st.session_state["user_maliyetler"] = edited_df['Ürün Maliyeti'].values
+                st.rerun()
+
         except Exception as e:
             st.error(f'Dosya işleme hatası: {e}')
